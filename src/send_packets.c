@@ -93,6 +93,49 @@ float2timer(float time, struct timeval *tvp)
     tvp->tv_usec = n * 100000;
 }
 
+void init_queue(packet_queue *queue)
+{
+    queue->head = NULL;
+    queue->tail = NULL;
+}
+
+bool enqueue(packet_queue *packets, pcap_pkt *packet)
+{
+    node *newNode = malloc(sizeof(node));
+    if (newNode == NULL)
+    {
+        return false;
+    }
+    newNode->packet = packet;
+    newNode->next   = NULL;
+    if (packets->tail != NULL)
+    {
+        packets->tail->next = newNode;
+    }
+    packets->tail = newNode;
+    if (packets->head == NULL)
+    {
+        packets->head = newNode;
+    }
+    return true;
+}
+
+
+#define QUEUE_EMPTY INT_MIN
+pcap_pkt *dequeue(packet_queue *packets)
+{
+    if (packets->head == NULL) return NULL;
+    node *tmp = packets->head;
+    pcap_pkt *packet = tmp->packet;
+    packets->head = packets->head->next;
+    if (packets->head == NULL)
+    {
+        packets->tail = NULL;
+    }
+    free(tmp);
+    return packet;
+}
+
 static char* find_file(const char* filename)
 {
     char *fullpath;
@@ -256,6 +299,8 @@ void send_packets(play_args_t* play_args)
      * allows the thread to be cancelled cleanly.
      */
     pthread_cleanup_push(send_packets_cleanup, ((void *) &sock));
+    packet_queue replay_packets;
+    init_queue(&replay_packets);
 
     while (pkt_index < pkt_max) {
         memcpy(udp, pkt_index->data, pkt_index->pktlen);
@@ -263,6 +308,11 @@ void send_packets(play_args_t* play_args)
         /* modify UDP ports */
         udp->uh_sport = htons(port_diff + ntohs(*from_port));
         udp->uh_dport = htons(port_diff + ntohs(*to_port));
+
+        // TODO: Update timestamp and SEQ num.
+        // host_seqnum = ntohs(((rtp_header_t*)audio_packet_in.data())->seq);
+        // host_timestamp = ntohl(((rtp_header_t*)audio_packet_in.data())->timestamp);
+        enqueue(&replay_packets, pkt_index);
 
         if (!media_ip_is_ipv6) {
             temp_sum = checksum_carry(

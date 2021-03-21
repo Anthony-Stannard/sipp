@@ -39,6 +39,23 @@ typedef struct {
     pcap_pkt* pkts;
 } pcap_pkts;
 
+typedef struct {
+    uint16_t flags;
+    uint16_t seq;
+    uint32_t timestamp;
+    uint32_t ssrc_id;
+} rtp_header_t;
+
+typedef struct node {
+    pcap_pkt *packet;
+    struct node *next;
+} node;
+
+typedef struct {
+    node *head;
+    node *tail;
+} packet_queue;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
