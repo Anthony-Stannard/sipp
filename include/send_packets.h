@@ -120,6 +120,43 @@ typedef struct {
     uint16_t last_seq_no;
 } play_args_t;
 
+typedef struct {
+    uint16_t flags;
+    uint16_t seq;
+    uint32_t timestamp;
+    uint32_t ssrc_id;
+} rtp_header;
+
+typedef struct packet_node {
+    pcap_pkt *packet;
+    struct packet_node *next;
+} packet_node;
+
+typedef struct {
+    packet_node *head;
+    packet_node *tail;
+} packet_queue;
+
+typedef struct seq_node {
+    uint16_t seq;
+    struct seq_node *next;
+} seq_node;
+
+typedef struct {
+    seq_node *head;
+    seq_node *tail;
+} seq_queue;
+
+typedef struct timestamp_node {
+    uint32_t timestamp;
+    struct timestamp_node *next;
+} timestamp_node;
+
+typedef struct {
+    timestamp_node *head;
+    timestamp_node *tail;
+} timestamp_queue;
+
 #ifdef __cplusplus
 extern "C"
 {

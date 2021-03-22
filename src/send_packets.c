@@ -93,41 +93,50 @@ float2timer(float time, struct timeval *tvp)
     tvp->tv_usec = n * 100000;
 }
 
-void init_queue(packet_queue *queue)
+void init_pkt_queue(packet_queue *queue)
 {
     queue->head = NULL;
     queue->tail = NULL;
 }
 
-bool enqueue(packet_queue *packets, pcap_pkt *packet)
+void init_seq_queue(seq_queue *queue)
 {
-    node *newNode = malloc(sizeof(node));
-    if (newNode == NULL)
-    {
-        return false;
-    }
-    newNode->packet = packet;
-    newNode->next   = NULL;
+    queue->head = NULL;
+    queue->tail = NULL;
+}
+
+void init_tstamp_queue(timestamp_queue *queue)
+{
+    queue->head = NULL;
+    queue->tail = NULL;
+}
+
+void packet_enqueue(packet_queue *packets, pcap_pkt *packet)
+{
+    packet_node *newNode = malloc(sizeof(packet_node));
+    newNode->packet      = packet;
+    newNode->next        = NULL;
+
     if (packets->tail != NULL)
     {
         packets->tail->next = newNode;
     }
+
     packets->tail = newNode;
     if (packets->head == NULL)
     {
         packets->head = newNode;
     }
-    return true;
 }
 
 
-#define QUEUE_EMPTY INT_MIN
-pcap_pkt *dequeue(packet_queue *packets)
+pcap_pkt *packet_dequeue(packet_queue *packets)
 {
     if (packets->head == NULL) return NULL;
-    node *tmp = packets->head;
+    packet_node *tmp = packets->head;
     pcap_pkt *packet = tmp->packet;
     packets->head = packets->head->next;
+
     if (packets->head == NULL)
     {
         packets->tail = NULL;
@@ -135,6 +144,79 @@ pcap_pkt *dequeue(packet_queue *packets)
     free(tmp);
     return packet;
 }
+
+void seq_enqueue(seq_queue *seq_nums, uint16_t seq_num)
+{
+    seq_node *newNode = malloc(sizeof(seq_node));
+    newNode->seq      = seq_num;
+    newNode->next     = NULL;
+
+    if (seq_nums->tail != NULL)
+    {
+        seq_nums->tail->next = newNode;
+    }
+
+    seq_nums->tail = newNode;
+    if (seq_nums->head == NULL)
+    {
+        seq_nums->head = newNode;
+    }
+}
+
+
+uint16_t seq_dequeue(seq_queue *seq_nums)
+{
+    if (seq_nums->head == NULL) return NULL;
+
+    seq_node *tmp  = seq_nums->head;
+    uint16_t seq   = tmp->seq;
+    seq_nums->head = seq_nums->head->next;
+
+    if (seq_nums->head == NULL)
+    {
+        seq_nums->tail = NULL;
+    }
+
+    free(tmp);
+    return seq;
+}
+
+void timestamp_enqueue(timestamp_queue *timestamps, uint32_t timestamp)
+{
+    timestamp_node *newNode = malloc(sizeof(timestamp_node));
+    newNode->timestamp      = timestamp;
+    newNode->next     = NULL;
+
+    if (timestamps->tail != NULL)
+    {
+        timestamps->tail->next = newNode;
+    }
+
+    timestamps->tail = newNode;
+    if (timestamps->head == NULL)
+    {
+        timestamps->head = newNode;
+    }
+}
+
+
+uint32_t timestamp_dequeue(timestamp_queue *timestamps)
+{
+    if (timestamps->head == NULL) return NULL;
+
+    timestamp_node *tmp  = timestamps->head;
+    uint32_t timestamp  = tmp->timestamp;
+    timestamps->head = timestamps->head->next;
+
+    if (timestamps->head == NULL)
+    {
+        timestamps->tail = NULL;
+    }
+
+    free(tmp);
+    return timestamp;
+}
+
 
 static char* find_file(const char* filename)
 {
@@ -300,7 +382,16 @@ void send_packets(play_args_t* play_args)
      */
     pthread_cleanup_push(send_packets_cleanup, ((void *) &sock));
     packet_queue replay_packets;
-    init_queue(&replay_packets);
+    seq_queue seq_nums;
+    timestamp_queue timestamps;
+    init_pkt_queue(&replay_packets);
+    init_seq_queue(&seq_nums);
+    init_tstamp_queue(&timestamps);
+    uint16_t first_seq_num;
+    uint16_t last_seq_num;
+    uint32_t first_timestamp;
+    uint32_t last_timestamp;
+    int i = 0;
 
     while (pkt_index < pkt_max) {
         memcpy(udp, pkt_index->data, pkt_index->pktlen);
@@ -310,9 +401,22 @@ void send_packets(play_args_t* play_args)
         udp->uh_dport = htons(port_diff + ntohs(*to_port));
 
         // TODO: Update timestamp and SEQ num.
-        // host_seqnum = ntohs(((rtp_header_t*)audio_packet_in.data())->seq);
-        // host_timestamp = ntohl(((rtp_header_t*)audio_packet_in.data())->timestamp);
-        enqueue(&replay_packets, pkt_index);
+        if (i > 1)
+        {
+            rtp_header *rtp    = (rtp_header *)((char *)udp + sizeof(*udp));
+            uint16_t seq_num   = ntohs(rtp->seq);
+            uint32_t timestamp = ntohs(rtp->timestamp);
+            if (i == 2)
+            {
+                first_seq_num   = seq_num;
+                first_timestamp = timestamp;
+            }
+            seq_enqueue(&seq_nums, seq_num);
+            timestamp_enqueue(&timestamps, timestamp);
+            last_seq_num   = seq_num;
+            last_timestamp = timestamp;
+        }
+        packet_enqueue(&replay_packets, pkt_index);
 
         if (!media_ip_is_ipv6) {
             temp_sum = checksum_carry(
@@ -361,6 +465,82 @@ void send_packets(play_args_t* play_args)
         rtp_bytes_pcap += pkt_index->pktlen - sizeof(*udp);
         memcpy (&last, &(pkt_index->ts), sizeof(struct timeval));
         pkt_index++;
+        i++;
+    }
+
+    int timestamp_diff = last_timestamp - first_timestamp;
+    int seq_num_dff    = last_seq_num - first_seq_num;
+    int total_packets  = i;
+    i = 0;
+
+    while (true) {
+        pkt_index = packet_dequeue(&replay_packets);
+        memcpy(udp, pkt_index->data, pkt_index->pktlen);
+        // port_diff = ntohs(udp->uh_dport) - pkts->base;
+        // /* modify UDP ports */
+        // udp->uh_sport = htons(port_diff + ntohs(*from_port));
+        // udp->uh_dport = htons(port_diff + ntohs(*to_port));
+
+        // TODO: Update timestamp and SEQ num.
+        if (i > 1)
+        {
+            rtp_header *rtp    = (rtp_header *)((char *)udp + sizeof(*udp));
+            // Update seq num and timestamp.
+            rtp->seq = htons(ntohs(rtp->seq) + seq_num_dff + 1);
+            rtp->timestamp = htons(ntohs(rtp->timestamp) + timestamp_diff + 3000);
+        }
+        packet_enqueue(&replay_packets, pkt_index);
+
+        // TODO: Need to amend checksum to include change to RTP seq num and timestamp.
+        if (!media_ip_is_ipv6) {
+            temp_sum = checksum_carry(
+                    pkt_index->partial_check +
+                    check((uint16_t *) &(((struct sockaddr_in *)(void *) from)->sin_addr.s_addr), 4) +
+                    check((uint16_t *) &(((struct sockaddr_in *)(void *) to)->sin_addr.s_addr), 4) +
+                    check((uint16_t *) &udp->uh_sport, 4));
+        } else {
+            temp_sum = checksum_carry(
+                    pkt_index->partial_check +
+                    check((uint16_t *) &(from6.sin6_addr.s6_addr), 16) +
+                    check((uint16_t *) &(to6.sin6_addr.s6_addr), 16) +
+                    check((uint16_t *) &udp->uh_sport, 4));
+        }
+#if !defined(_HPUX_LI) && defined(__HPUX)
+        udp->uh_sum = (temp_sum>>16)+((temp_sum & 0xffff)<<16);
+#else
+        udp->uh_sum = temp_sum;
+#endif
+
+        do_sleep ((struct timeval *) &pkt_index->ts, &last, &didsleep,
+                  &start);
+#ifdef MSG_DONTWAIT
+        if (!media_ip_is_ipv6) {
+            ret = sendto(sock, buffer, pkt_index->pktlen, MSG_DONTWAIT,
+                         (struct sockaddr *)to, sizeof(struct sockaddr_in));
+        } else {
+            ret = sendto(sock, buffer, pkt_index->pktlen, MSG_DONTWAIT,
+                         (struct sockaddr *)&to6, sizeof(struct sockaddr_in6));
+        }
+#else
+        if (!media_ip_is_ipv6) {
+            ret = sendto(sock, buffer, pkt_index->pktlen, 0,
+                         (struct sockaddr *)to, sizeof(struct sockaddr_in));
+        } else {
+            ret = sendto(sock, buffer, pkt_index->pktlen, 0,
+                         (struct sockaddr *)&to6, sizeof(struct sockaddr_in6));
+        }
+#endif
+        if (ret < 0) {
+            WARNING("send_packets.c: sendto failed with error: %s", strerror(errno));
+            goto pop1;
+        }
+
+        rtp_pckts_pcap++;
+        rtp_bytes_pcap += pkt_index->pktlen - sizeof(*udp);
+        memcpy (&last, &(pkt_index->ts), sizeof(struct timeval));
+        pkt_index++;
+        i++;
+        i = i % total_packets;
     }
 
     /* Closing the socket is handled by pthread_cleanup_push()/pthread_cleanup_pop() */
