@@ -405,7 +405,7 @@ void send_packets(play_args_t* play_args)
         {
             rtp_header *rtp    = (rtp_header *)((char *)udp + sizeof(*udp));
             uint16_t seq_num   = ntohs(rtp->seq);
-            uint32_t timestamp = ntohs(rtp->timestamp);
+            uint32_t timestamp = ntohl(rtp->timestamp);
             if (i == 2)
             {
                 first_seq_num   = seq_num;
@@ -468,7 +468,8 @@ void send_packets(play_args_t* play_args)
         i++;
     }
 
-    int timestamp_diff = last_timestamp - first_timestamp;
+    uint32_t timestamp_diff = last_timestamp - first_timestamp;
+    uint32_t single_diff    = 3000;
     int seq_num_dff    = last_seq_num - first_seq_num;
     int total_packets  = i;
     i = 0;
@@ -476,10 +477,10 @@ void send_packets(play_args_t* play_args)
     while (true) {
         pkt_index = packet_dequeue(&replay_packets);
         memcpy(udp, pkt_index->data, pkt_index->pktlen);
-        // port_diff = ntohs(udp->uh_dport) - pkts->base;
-        // /* modify UDP ports */
-        // udp->uh_sport = htons(port_diff + ntohs(*from_port));
-        // udp->uh_dport = htons(port_diff + ntohs(*to_port));
+        port_diff = ntohs(udp->uh_dport) - pkts->base;
+        /* modify UDP ports */
+        udp->uh_sport = htons(port_diff + ntohs(*from_port));
+        udp->uh_dport = htons(port_diff + ntohs(*to_port));
 
         // TODO: Update timestamp and SEQ num.
         if (i > 1)
@@ -487,7 +488,7 @@ void send_packets(play_args_t* play_args)
             rtp_header *rtp    = (rtp_header *)((char *)udp + sizeof(*udp));
             // Update seq num and timestamp.
             rtp->seq = htons(ntohs(rtp->seq) + seq_num_dff + 1);
-            rtp->timestamp = htons(ntohs(rtp->timestamp) + timestamp_diff + 3000);
+            rtp->timestamp = htonl(ntohl(rtp->timestamp) + timestamp_diff + single_diff);
         }
         packet_enqueue(&replay_packets, pkt_index);
 
