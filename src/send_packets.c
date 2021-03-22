@@ -132,7 +132,7 @@ void packet_enqueue(packet_queue *packets, pcap_pkt *packet)
 
 pcap_pkt *packet_dequeue(packet_queue *packets)
 {
-    if (packets->head == NULL) return NULL;
+    // if (packets->head == NULL) return NULL;
     packet_node *tmp = packets->head;
     pcap_pkt *packet = tmp->packet;
     packets->head = packets->head->next;
@@ -166,7 +166,7 @@ void seq_enqueue(seq_queue *seq_nums, uint16_t seq_num)
 
 uint16_t seq_dequeue(seq_queue *seq_nums)
 {
-    if (seq_nums->head == NULL) return NULL;
+    // if (seq_nums->head == NULL) return NULL;
 
     seq_node *tmp  = seq_nums->head;
     uint16_t seq   = tmp->seq;
@@ -202,7 +202,7 @@ void timestamp_enqueue(timestamp_queue *timestamps, uint32_t timestamp)
 
 uint32_t timestamp_dequeue(timestamp_queue *timestamps)
 {
-    if (timestamps->head == NULL) return NULL;
+    // if (timestamps->head == NULL) return NULL;
 
     timestamp_node *tmp  = timestamps->head;
     uint32_t timestamp  = tmp->timestamp;
